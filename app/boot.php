@@ -20,7 +20,7 @@ ini_set('max_execution_time', '0');
 ini_set('max_input_vars', '100000');
 
 // Grab the configuration file
-$config = require BASEPATH . "app/config.sample.php";
+$config = require BASEPATH . "app/config.php";
 
 // Set the timestamp (start)
 $timestamp = date('Y-m-d_H:i:s');
