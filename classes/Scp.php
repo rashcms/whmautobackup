@@ -57,8 +57,8 @@ class Scp
      */
     public function connect()
     {
-        $this->connection = ssh2_connect($this->host, $this->port);
-        if (!ssh2_auth_password($this->connection, $this->username, $this->password)) {
+        $this->connection = @ssh2_connect($this->host, $this->port);
+        if (!@ssh2_auth_password($this->connection, $this->username, $this->password)) {
             throw new \Exception("Failed to connect to remote SCP server: invalid username/password.");
         }
         $this->sftp = ssh2_sftp($this->connection);
@@ -68,10 +68,14 @@ class Scp
      * Creates a directory for the current runtime timestamp.
      *
      * @param $timestamp
-     * @return bool
+     * @return string|bool
      */
     public function makeRuntimeDirectory($timestamp)
     {
-        return ssh2_sftp_mkdir($this->sftp, $this->directory . $timestamp, true);
+        $path = $this->directory . $timestamp;
+        $s = ssh2_sftp_mkdir($this->sftp, $path, 0700, true);
+        if ($s)
+            return $path;
+        return false;
     }
 }

@@ -3,7 +3,9 @@
         "gufy/cpanel-whm": "dev-master",
         "danielstjules/stringy": "~3.1.0",
         "phpmailer/phpmailer": "~6.0",
-        "league/climate": "^3.5"
+        "league/climate": "^3.5",
+        "ext-json": "*",
+        "ext-ssh2": "*"
     },
     "autoload": {
         "psr-4": {

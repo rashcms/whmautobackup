@@ -14,6 +14,7 @@ if (!defined('BASEPATH')) {
 }
 
 // Override PHP settings
+date_default_timezone_set('Asia/Manila');
 ini_set('memory_limit', '-1');
 set_time_limit(0);
 ini_set('max_execution_time', '0');
@@ -23,7 +24,7 @@ ini_set('max_input_vars', '100000');
 $config = require BASEPATH . "app/config.php";
 
 // Set the timestamp (start)
-$timestamp = date('Y-m-d_H:i:s');
+$timestamp = date('Y-m-d_H-i-s');
 
 // Get composer
 require BASEPATH . "vendor/autoload.php";

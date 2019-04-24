@@ -60,10 +60,11 @@ try {
 
 // Check if the destination exists in the config file
 $destination = $cli->arguments->get('destination');
-if (!array_key_exists($destination, $config['servers'])) {
+if (!array_key_exists($destination, $config['destinations'])) {
     $cli->error("Destination `{$destination}` does not exist.");
     exit(1);
 }
+$destinationData = $config['destinations'][$destination];
 
 // Loop through the servers
 $servers = [];
@@ -81,6 +82,25 @@ if ($cli->arguments->defined('servers')) {
 foreach ($servers as $server) {
     if (!array_key_exists($server, $config['servers'])) {
         $cli->error("Server `{$server}` does not exist.");
+        exit(1);
+    }
+}
+
+$cli->backgroundGreen('WHM AutoBackup v3.0.0');
+$cli->out("Initializing...");
+
+// Prepare destination directory if SCP/FTP
+if ($destinationData['type'] == 'scp-pass') {
+    try {
+        $scp = new \Classes\Scp($destinationData);
+        $path = $scp->makeRuntimeDirectory($timestamp);
+        if (!$path) {
+            $cli->error("Failed to create backup destination directory via SCP.");
+            exit(1);
+        }
+        $cli->green("Using path {$path} on remote");
+    } catch (Exception $e) {
+        $cli->error($e->getMessage());
         exit(1);
     }
 }
@@ -112,10 +132,44 @@ foreach ($servers as $server) {
         $cli->error($e->getMessage());
         continue;
     }
-    
+
     $accountsJSON = @json_decode($accounts);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        $cli->error('Server error: ' . substr($accounts, 0, strpos($accounts, 'response: {')));
-        break;
+        $cli->error('Server error: ' . substr($accounts, 0, strpos($accounts, 'response:')));
+        $cli->error($accounts);
+        continue;
     }
+
+    $accountObjects = $accountsJSON->acct;
+    $accountObjectsCount = count($accountObjects);
+
+    // Count accounts
+    $cli->line("- Found {$accountObjectsCount} accounts");
+    foreach ($accountObjects as $object) {
+        if ($object->suspended) {
+            $cli->red("- Account {$object->user} is suspended. Skipping...");
+            continue;
+        }
+        $cli->out("- Processing account {$object->user}...");
+        if ($destinationData['type'] == 'scp-pass') {
+            $dd = [
+                'host' => $destinationData['host'],
+                'port' => $destinationData['port'],
+                'username' => $destinationData['username'],
+                'password' => $destinationData['password'],
+                'directory' => $path
+            ];
+            if ($cli->arguments->defined('email')) {
+                $email = $cli->arguments->get('email');
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $cli->error("Invalid e-mail address specified on runtime for alerts. Skipping e-mail...");
+                } else {
+                    $dd['email'] = $cli->arguments->get('email');
+                }
+            }
+            $cpanel->execute_action('3', 'Backup', 'fullbackup_to_scp_with_password', $dd);
+        }
+    }
+    $cli->br();
+    $cli->green("Backup requests sent.");
 }
