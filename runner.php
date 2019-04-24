@@ -23,6 +23,7 @@ require BASEPATH . "app/boot.php";
  * This makes it easy to make logs that can be sent to admins via e-mail.
  */
 //$message = "";
+$status = [];
 
 /**
  * Begin.
@@ -116,6 +117,11 @@ foreach ($servers as $server) {
         }
     }
     $cli->flank($server . ' - ' . $meta['host']);
+    $status[$server] = [
+        'success' => 0,
+        'fail' => 0,
+        'skip' => 0
+    ];
     // Attempt to connect
     $cli->yellow("Attempting to connect to server `{$server}`...");
     try {
@@ -157,19 +163,48 @@ foreach ($servers as $server) {
                 'port' => $destinationData['port'],
                 'username' => $destinationData['username'],
                 'password' => $destinationData['password'],
-                'directory' => $path
+                'directory' => $path,
+                'cpanel_jsonapi_user' => $object->user
             ];
             if ($cli->arguments->defined('email')) {
                 $email = $cli->arguments->get('email');
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     $cli->error("Invalid e-mail address specified on runtime for alerts. Skipping e-mail...");
+                    $status[$server]['skip']++;
                 } else {
                     $dd['email'] = $cli->arguments->get('email');
                 }
             }
-            $cpanel->execute_action('3', 'Backup', 'fullbackup_to_scp_with_password', $dd);
+            $action = $cpanel->execute_action('3', 'Backup', 'fullbackup_to_scp_with_password', $object->user, $dd);
+            $actionJSON = @json_decode($action);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $cli->error('Server error: ' . substr($accounts, 0, strpos($accounts, 'response:')));
+                $status[$server]['fail']++;
+                $cli->error($accounts);
+                continue;
+            }
+            if ($actionJSON->result->status) {
+                $cli->green("\tSuccess! PID {$actionJSON->result->data->pid}");
+                $status[$server]['success']++;
+            } else {
+                $cli->red("\tFailed.");
+                $status[$server]['fail']++;
+            }
         }
     }
     $cli->br();
     $cli->green("Backup requests sent.");
 }
+
+// Done
+$cli->br();
+$cli->green("Operation complete.");
+$table = [
+    ['Server', 'Successful', 'Failed', 'Skipped']
+];
+foreach ($status as $server) {
+    $table[] = [
+        key($server), $server['success'], $server['fail'], $server['skip']
+    ];
+}
+$cli->table($table);
