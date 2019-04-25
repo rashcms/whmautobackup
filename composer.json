@@ -5,7 +5,8 @@
         "phpmailer/phpmailer": "~6.0",
         "league/climate": "^3.5",
         "ext-json": "*",
-        "ext-ssh2": "*"
+        "ext-ssh2": "*",
+        "ext-ftp": "*"
     },
     "autoload": {
         "psr-4": {

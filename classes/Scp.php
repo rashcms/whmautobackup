@@ -68,14 +68,19 @@ class Scp
      * Creates a directory for the current runtime timestamp.
      *
      * @param $timestamp
-     * @return string|bool
+     * @param $servers
+     * @throws \Exception
+     * @return string
      */
-    public function makeRuntimeDirectory($timestamp)
+    public function makeRuntimeDirectory($timestamp, $servers)
     {
         $path = $this->directory . $timestamp;
-        $s = ssh2_sftp_mkdir($this->sftp, $path, 0700, true);
-        if ($s)
-            return $path;
-        return false;
+        foreach ($servers as $server) {
+            $s = ssh2_sftp_mkdir($this->sftp, $path . "/" . $server, 0700, true);
+            if (!$s) {
+                throw new \Exception("Failed to create remote directory {$path}/{$server}");
+            }
+        }
+        return $path;
     }
 }

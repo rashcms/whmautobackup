@@ -19,11 +19,16 @@ define('BASEPATH', __DIR__ . DIRECTORY_SEPARATOR);
 require BASEPATH . "app/boot.php";
 
 /**
- * Have a handler of all messages.
+ * Have a handler of all status counters.
  * This makes it easy to make logs that can be sent to admins via e-mail.
  */
-//$message = "";
 $status = [];
+
+/**
+ * Define the starting time.
+ * This is used in the e-mail alert.
+ */
+$startTime = date('Y-m-d H:i:s');
 
 /**
  * Begin.
@@ -94,12 +99,24 @@ $cli->out("Initializing...");
 if ($destinationData['type'] == 'scp-pass') {
     try {
         $scp = new \Classes\Scp($destinationData);
-        $path = $scp->makeRuntimeDirectory($timestamp);
+        $path = $scp->makeRuntimeDirectory($timestamp, $servers);
         if (!$path) {
             $cli->error("Failed to create backup destination directory via SCP.");
             exit(1);
         }
         $cli->green("Using path {$path} on remote");
+    } catch (Exception $e) {
+        $cli->error($e->getMessage());
+        exit(1);
+    }
+} elseif ($destinationData['type'] == 'ftp') {
+    try {
+        $ftp = new \Classes\Ftp($destinationData);
+        $path = $ftp->makeRuntimeDirectory($timestamp, $servers);
+        if (!$path) {
+            $cli->error("Failed to create backup destination directory via SCP.");
+            exit(1);
+        }
     } catch (Exception $e) {
         $cli->error($e->getMessage());
         exit(1);
@@ -118,6 +135,7 @@ foreach ($servers as $server) {
     }
     $cli->flank($server . ' - ' . $meta['host']);
     $status[$server] = [
+        'name' => $server,
         'success' => 0,
         'fail' => 0,
         'skip' => 0
@@ -131,8 +149,8 @@ foreach ($servers as $server) {
             'auth_type'   =>  'hash', // set 'hash' or 'password'
             'password'    =>  $meta['token']
         ]);
-        $cpanel->setTimeout(30);
-        $cpanel->setConnectionTimeout(30);
+        $cpanel->setTimeout(180);
+        $cpanel->setConnectionTimeout(180);
         $accounts = $cpanel->listAccounts();
     } catch (Exception $e) {
         $cli->error($e->getMessage());
@@ -154,6 +172,7 @@ foreach ($servers as $server) {
     foreach ($accountObjects as $object) {
         if ($object->suspended) {
             $cli->red("- Account {$object->user} is suspended. Skipping...");
+            $status[$server]['skip']++;
             continue;
         }
         $cli->out("- Processing account {$object->user}...");
@@ -163,14 +182,13 @@ foreach ($servers as $server) {
                 'port' => $destinationData['port'],
                 'username' => $destinationData['username'],
                 'password' => $destinationData['password'],
-                'directory' => $path,
+                'directory' => $path . "/" . $server . "/",
                 'cpanel_jsonapi_user' => $object->user
             ];
             if ($cli->arguments->defined('email')) {
                 $email = $cli->arguments->get('email');
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     $cli->error("Invalid e-mail address specified on runtime for alerts. Skipping e-mail...");
-                    $status[$server]['skip']++;
                 } else {
                     $dd['email'] = $cli->arguments->get('email');
                 }
@@ -190,21 +208,132 @@ foreach ($servers as $server) {
                 $cli->red("\tFailed.");
                 $status[$server]['fail']++;
             }
+        } elseif ($destinationData['type'] === 'ftp') {
+            $dd = [
+                'host' => $destinationData['host'],
+                'port' => $destinationData['port'],
+                'username' => $destinationData['username'],
+                'password' => $destinationData['password'],
+                'variant' => $destinationData['variant'],
+                'directory' => $path . "/" . $server . "/",
+                'cpanel_jsonapi_user' => $object->user
+            ];
+            if ($cli->arguments->defined('email')) {
+                $email = $cli->arguments->get('email');
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $cli->error("Invalid e-mail address specified on runtime for alerts. Skipping e-mail...");
+                } else {
+                    $dd['email'] = $cli->arguments->get('email');
+                }
+            }
+            $action = $cpanel->execute_action('3', 'Backup', 'fullbackup_to_ftp', $object->user, $dd);
+            $actionJSON = @json_decode($action);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $cli->error('Server error: ' . substr($accounts, 0, strpos($accounts, 'response:')));
+                $status[$server]['fail']++;
+                $cli->error($accounts);
+                continue;
+            }
+            if ($actionJSON->result->status) {
+                $cli->green("\tSuccess! PID {$actionJSON->result->data->pid}");
+                $status[$server]['success']++;
+            } else {
+                $cli->red("\tFailed.");
+                $fp = fopen('test.txt', 'a+');
+                fwrite($fp, $action . PHP_EOL);
+                fclose($fp);
+                $status[$server]['fail']++;
+            }
         }
     }
     $cli->br();
-    $cli->green("Backup requests sent.");
+    $cli->green("Server {$server} finished.");
+    $cli->br();
 }
 
 // Done
+$endTime = date('Y-m-d H:i:s');
 $cli->br();
-$cli->green("Operation complete.");
-$table = [
-    ['Server', 'Successful', 'Failed', 'Skipped']
+$d1 = new DateTime($startTime);
+$d2 = new DateTime($endTime);
+$totalTime = $d2->getTimestamp() - $d1->getTimestamp();
+$cli->green("Operation complete. Total time: " . $totalTime . " seconds.");
+$cli->br();
+
+$tableData = [
+    [
+        'Server Name', 'Successful', 'Failed', 'Skipped'
+    ]
 ];
-foreach ($status as $server) {
-    $table[] = [
-        key($server), $server['success'], $server['fail'], $server['skip']
+foreach ($status as $kServer) {
+    $tableData[] = [
+        $kServer['name'], $kServer['success'], $kServer['fail'], $kServer['skip']
     ];
 }
-$cli->table($table);
+
+$cli->table($tableData);
+
+// Send e-mail
+if ($config['email']) {
+    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+    $mc = $config['phpmailer'];
+
+    $htmlTable = <<<EOF
+<table style="border-collapse: collapse; width: 100%;">
+    <tr>
+        <th style="text-align: center; border: 1px solid #ccc;">Server</th>
+        <th style="text-align: center; border: 1px solid #ccc;">Successful</th>
+        <th style="text-align: center; border: 1px solid #ccc;">Failed</th>
+        <th style="text-align: center; border: 1px solid #ccc;">Skipped</th>
+    </tr>
+EOF;
+
+    foreach ($status as $kServer) {
+        $htmlTable .= <<<EOF
+<tr>
+    <td style="text-align: center; border: 1px solid #ccc;">{$kServer['name']}</td>
+    <td style="text-align: center; border: 1px solid #ccc;">{$kServer['success']}</td>
+    <td style="text-align: center; border: 1px solid #ccc;">{$kServer['fail']}</td>
+    <td style="text-align: center; border: 1px solid #ccc;">{$kServer['skip']}</td>
+</tr>
+EOF;
+    }
+
+    $htmlTable .= "</table>";
+    try {
+        $mail->isSMTP();
+        $mail->Host = $mc['host'];
+        $mail->SMTPAuth = $mc['auth'];
+        $mail->Username = $mc['username'];
+        $mail->Password = $mc['password'];
+        $mail->SMTPSecure = $mc['security'];
+        $mail->Port = $mc['port'];
+        $mail->setFrom($mc['from'][1], $mc['from'][0]);
+        foreach ($mc['to'] as $name => $email) {
+            $mail->addAddress($email, $name);
+        }
+        foreach ($mc['cc'] as $name => $email) {
+            $mail->addCC($email, $name);
+        }
+        foreach ($mc['bcc'] as $name => $email) {
+            $mail->addBCC($email, $name);
+        }
+        $mail->isHTML($mc['html']);
+        $mail->Subject = $mc['subject'];
+        $mail->Body = <<<EOF
+<p>The WHM Auto Backup runner has completed its tasks. Please see the details below:</p>
+<ul>
+    <li>Destination: {$destination} ({$destinationData['type']})</li>
+    <li>Path on Remote: {$path}</li>
+    <li>Start Time: {$startTime}</li>
+    <li>Runner End Time: {$endTime}</li>
+    <li>Total Running Time: {$totalTime} seconds</li>
+</ul>
+{$htmlTable}
+EOF;
+        $mail->send();
+    } catch (Exception $e) {
+        $cli->error($e->getMessage());
+        $cli->info("The runner has finished successfully, but we failed to send the e-mail.");
+    }
+}

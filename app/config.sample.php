@@ -71,15 +71,10 @@ return [
      * that can be specified as an argument to the runner. No more than one (1) destination
      * is allowed.
      *
-     * Supported configuration types: homedir, ftp, scp-pass
+     * Supported configuration types: ftp, scp-pass
      */
     'destinations' => [
-        [
-            'name' => 'homedir',
-            'type' => 'homedir'
-        ],
-        [
-            'name' => 'ftpserver1',
+        'ftpserver1' => [
             'type' => 'ftp',
             'variant' => 'active', // Accepted values: active or passive (a.k.a. FTP Transfer Mode)
             'username' => 'ftpuser',
@@ -88,14 +83,31 @@ return [
             'directory' => '~/target/directory/',
             'port' => 21
         ],
-        [
-            'name' => 'scpserver1',
+        'scpserver1' => [
             'type' => 'scp-pass',
-            'username' => 'ftpuser',
-            'password' => 'ftppassword',
-            'host' => 'ftp.example.com',
-            'directory' => '~/target/directory/',
+            'username' => 'your_scp_username',
+            'password' => 'your_scp_password',
+            'host' => 'host.example.com',
+            'directory' => 'backups/',
             'port' => 22
         ]
+    ],
+
+    /**
+     * Server Index
+     */
+    'servers' => [
+        'server1' => [
+            'host' => 'server1.hostname.com',
+            'username' => 'username',
+            'token' => 'api-token',
+            'port' => 2087
+        ],
+        'server2' => [
+            'host' => 'server2.hostname.com',
+            'username' => 'username',
+            'token' => 'api-token',
+            'port' => 2087
+        ],
     ]
 ];
