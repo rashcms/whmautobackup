@@ -79,7 +79,9 @@ class Ftp
         @ftp_chdir($this->connection, $ftpBaseDir);
         $parts = explode('/', $ftpPath);
         foreach($parts as $part){
-            if(!@ftp_chdir($this->connection, $part)){
+            //if(!@ftp_chdir($this->connection, $part)){
+            //ftp_chdir causes problem in some servers.
+            if (@ftp_nlist($this->connection, $part) === false) {
                 $m1 = @ftp_mkdir($this->connection, $part);
                 if (!$m1) {
                     return false;
